@@ -14,6 +14,7 @@
 set(DiscoPoP_SOURCES
         runtimeFunctions.cpp
         runtimeFunctionsGlobals.cpp
+        shared_metrics.cpp
 
         memory/MemoryManager.cpp
         memory/Signature.cpp
@@ -65,6 +66,9 @@ add_library(DiscoPoP_RT STATIC
         ${DiscoPoP_SOURCES})
 
 target_link_libraries(DiscoPoP_RT PRIVATE Boost::headers)
+
+# shm_open / shm_unlink used by shared_metrics.cpp
+target_link_libraries(DiscoPoP_RT PRIVATE rt)
 
 # forward compiler flags
 if(DEFINED DP_PTHREAD_COMPATIBILITY_MODE)

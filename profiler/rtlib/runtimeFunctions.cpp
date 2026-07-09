@@ -12,6 +12,7 @@
 
 #include "runtimeFunctions.hpp"
 #include "runtimeFunctionsGlobals.hpp"
+#include "shared_metrics.hpp"
 
 #include "DPUtils.hpp"
 
@@ -54,6 +55,9 @@ using namespace dputil;
 
 namespace __dp {
 
+
+static thread_local bool current_thread_is_second_queue_worker = false;
+
 /******* Helper functions *******/
 
 #if DP_CALLTREE_PROFILING
@@ -85,6 +89,12 @@ void addDep(depType type, LID curr, LID depOn, const char *var, std::int64_t AAv
   } else {
     posInDeps->second->insert(Dep(type, depOn, var, AAvar));
   }
+
+  // add to corresponding dep count
+  if (current_thread_is_second_queue_worker)
+    metrics_inc_second_queue_dependency_count();
+  else
+    metrics_inc_first_queue_dependency_count();
 
 #if DP_CALLTREE_PROFILING
   // register dependency for call_tree based metadata calculation
@@ -284,6 +294,9 @@ void initParallelization() {
   // Initialize count of accesses
   numAccesses = new uint64_t[NUM_WORKERS]();
 
+  // live metrics via shared memory
+  metrics_init(NUM_WORKERS, 1);
+
   // initialize and set thread detached attribute
   finalizeParallelizationCalled = false; // mostly for unit-tests.
   pthread_attr_t attr;
@@ -297,7 +310,7 @@ void initParallelization() {
 
   // create worker thread to process the secondAccessQueue
   secondAccessQueue_worker_thread = new pthread_t();
-  pthread_create(secondAccessQueue_worker_thread, &attr, processSecondAccessQueue, (void *)NUM_WORKERS);
+  pthread_create(secondAccessQueue_worker_thread, &attr, processSecondAccessQueue, (void *)0);
 
   pthread_attr_destroy(&attr);
 }
@@ -351,8 +364,10 @@ void mergeDeps() {
     }
 
     // merge the associated set with current lid into the global hash table
+    // add to total dep count if new
     for (auto &d : *(dep.second)) {
-      tmp_depSet->insert(d);
+      if (tmp_depSet->insert(d).second)
+        metrics_inc_total_dependency_count();
     }
   }
   allDepsLock.unlock();
@@ -466,9 +481,11 @@ void *processFirstAccessQueue(void *arg) {
   while (true) {
     // get chunk from queue
     current = firstAccessQueue.get(&secondAccessQueue);
+    metrics_set_first_queue_size(firstAccessQueue.size());
 
     // check if chunk aquired
     if (current) {
+      metrics_first_queue_worker_busy(id);
       // process chunk
       AbstractShadow *SMem = new PerfectShadow2();
       std::vector<AccessInfo> *entry_condition_accesses = new std::vector<AccessInfo>();
@@ -510,6 +527,7 @@ void *processFirstAccessQueue(void *arg) {
       delete current;
 
     } else {
+      metrics_first_queue_worker_idle(id);
       if (finalizeParallelizationCalled) {
         // no chunks left to process. Let thread finish.
         break;
@@ -551,6 +569,9 @@ void *processSecondAccessQueue(void *arg) {
   int64_t id = (int64_t)arg;
   myMap = new depMap();
 
+  // add found deps to right counter
+  current_thread_is_second_queue_worker = true;
+
   SecondAccessQueueElement *current = nullptr;
   AbstractShadow *SMem = new PerfectShadow2();
 #if DP_CALLTREE_PROFILING
@@ -563,9 +584,11 @@ void *processSecondAccessQueue(void *arg) {
   while (true) {
     // get chunk from queue
     current = secondAccessQueue.get();
+    metrics_set_second_queue_size(secondAccessQueue.size());
 
     // check if chunk aquired
     if (current) {
+      metrics_second_queue_worker_busy(id);
       // check entry boundary conditions for data dependencies
       auto promised_first_accesses_vector_ptr = current->entry_boundary_first_addr_accesses.get();
       for (auto &entry_accesses : *(promised_first_accesses_vector_ptr)) {
@@ -602,6 +625,7 @@ void *processSecondAccessQueue(void *arg) {
       delete current;
 
     } else {
+      metrics_second_queue_worker_idle(id);
       if (finalizeParallelizationCalled) {
         if (firstAccessQueue.empty()) {
           // no chunks left to process. Let thread finish.
@@ -664,6 +688,8 @@ void finalizeParallelization() {
   for (int i = 0; i < NUM_WORKERS; ++i)
     pthread_join(workers[i], NULL);
   pthread_join(*secondAccessQueue_worker_thread, NULL);
+
+  metrics_shutdown();
 
   // delete allocated memory
   delete[] workers;

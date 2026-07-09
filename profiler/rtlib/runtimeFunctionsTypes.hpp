@@ -220,6 +220,11 @@ public:
     return internal_queue.empty();
   }
 
+  std::size_t size() {
+    const std::lock_guard<std::mutex> lock(internal_mtx);
+    return internal_queue.size();
+  }
+
 private:
   std::queue<SecondAccessQueueElement *> internal_queue;
   std::mutex internal_mtx;
@@ -257,6 +262,11 @@ public:
   bool empty() {
     const std::lock_guard<std::mutex> lock(internal_mtx);
     return internal_queue.empty();
+  }
+
+  std::size_t size() {
+    const std::lock_guard<std::mutex> lock(internal_mtx);
+    return internal_queue.size();
   }
 
 private:
