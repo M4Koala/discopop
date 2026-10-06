@@ -14,6 +14,7 @@
 
 #include "../runtimeFunctions.hpp"
 #include "../runtimeFunctionsGlobals.hpp"
+#include "../shared_metrics.hpp"
 
 #include "../../share/include/debug_print.hpp"
 #include "../../share/include/timer.hpp"
@@ -142,6 +143,10 @@ void __dp_func_entry(LID lid, int32_t isStart) {
     } else {
       initSingleThreadedExecution();
     }
+#if DP_METRICS_FUNC_ENTRY
+    // first entry, FuncStackLevel is 0
+    metrics_func_entry(lid, 0);
+#endif
   } else if (targetTerminated) {
     if (DP_DEBUG) {
       cout << "Entering function LID " << std::dec << dputil::decodeLID(lid);
@@ -149,6 +154,9 @@ void __dp_func_entry(LID lid, int32_t isStart) {
     }
   } else {
     function_manager->register_function_start(lid);
+#if DP_METRICS_FUNC_ENTRY
+    metrics_func_entry(lid, function_manager->get_current_stack_level());
+#endif
   }
 
 #ifdef DP_INTERNAL_TIMER

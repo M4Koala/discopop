@@ -66,6 +66,10 @@ void __dp_write(LID lid, ADDR addr, const char *var) {
   }
 #endif
 
+  if (!profiling_enabled()) {
+    return;
+  }
+
   // For tracking function call or invoke
   function_manager->reset_call(lid);
 

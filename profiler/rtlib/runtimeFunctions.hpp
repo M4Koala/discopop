@@ -41,6 +41,8 @@ void initSingleThreadedExecution();
 
 void mergeDeps();
 
+bool profiling_enabled();
+
 // void *analyzeDeps(void *arg);
 
 void *processFirstAccessQueue(void *arg);

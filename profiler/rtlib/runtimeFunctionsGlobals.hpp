@@ -85,7 +85,7 @@ extern std::mutex allDepsLock;
 extern pthread_t *workers;                          // worker threads
 extern volatile bool finalizeParallelizationCalled; // signals to worker threads that no further data access will be
                                                     // registered in the first queue
-extern FirstAccessQueueChunk *mainThread_AccessInfoBuffer;
+extern FirstAccessQueueChunk *mainThread_AccessInfoBuffer; // nullptr while profiling is off
 #define FIRST_ACCESS_QUEUE_SIZES 100000
 #define SECOND_ACCESS_QUEUE_SIZES 1000
 

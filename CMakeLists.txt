@@ -107,6 +107,7 @@ file(APPEND "${DiscoPoP_SOURCE_DIR}/library/discopop_library/ConfigProvider/asse
 file(APPEND "${DiscoPoP_SOURCE_DIR}/library/discopop_library/ConfigProvider/assets/build_config.py" "DP_MEMORY_REGION_DEALIASING=\"${DP_MEMORY_REGION_DEALIASING}\"\n")
 file(APPEND "${DiscoPoP_SOURCE_DIR}/library/discopop_library/ConfigProvider/assets/build_config.py" "DP_BRANCH_TRACKING=\"${DP_BRANCH_TRACKING}\"\n")
 file(APPEND "${DiscoPoP_SOURCE_DIR}/library/discopop_library/ConfigProvider/assets/build_config.py" "DP_BUILD_UNITTESTS=\"${DP_BUILD_UNITTESTS}\"\n")
+file(APPEND "${DiscoPoP_SOURCE_DIR}/library/discopop_library/ConfigProvider/assets/build_config.py" "DP_LIVE_METRICS=\"${DP_LIVE_METRICS}\"\n")
 
 
 if(NOT ${IS_DEB_INSTALL} STREQUAL "")

@@ -13,6 +13,7 @@
 #include "../DPTypes.hpp"
 
 #include "../runtimeFunctionsGlobals.hpp"
+#include "../shared_metrics.hpp"
 
 #include "../../share/include/debug_print.hpp"
 #include "../../share/include/timer.hpp"
@@ -46,7 +47,11 @@ void __dp_report_bb(uint32_t bbIndex) {
   const auto timer = Timer(timers, TimerRegion::REPORT_BB);
 #endif
 
+#if DP_METRICS_BB
+  metrics_report_bb(bbList->insert(bbIndex).second);
+#else
   bbList->insert(bbIndex);
+#endif
 }
 }
 

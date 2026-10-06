@@ -17,6 +17,7 @@
 #include "LoopTable.hpp"
 
 #include "../DPUtils.hpp"
+#include "../shared_metrics.hpp"
 
 #include <ostream>
 
@@ -47,11 +48,15 @@ public:
     loopStack.non_const_top().set_dependency_metadata_calculation_enabled(inherited_dep_metadata_calculation);
 
 #endif
-    if (loops.find(begin_line) == loops.end()) {
+    const bool is_new_static_loop = loops.find(begin_line) == loops.end();
+    if (is_new_static_loop) {
       loops.insert(pair<LID, LoopRecord *>(begin_line, new LoopRecord(0, 0, 0)));
     }
 #ifdef DP_DEBUG
     std::cout << "(" << std::dec << FuncStackLevel << ")Loop " << loop_id << " enters." << std::endl;
+#endif
+#if DP_METRICS_LOOP_ENTRY
+    metrics_loop_entry(begin_line, loopStack.size(), is_new_static_loop);
 #endif
   }
 
@@ -84,6 +89,9 @@ public:
     std::cout << "(" << std::dec << loopStack.top().funcLevel << ")";
     std::cout << "Loop " << loopStack.top().loopID << " iterates " << loopStack.top().count << " times." << std::endl;
 #endif
+#if DP_METRICS_LOOP_ITERATION
+    metrics_loop_iteration(loopStack.top().begin, loopStack.top().get_count(), loopStack.size());
+#endif
   }
 
   void clean_function_exit(const std::int32_t function_level, const LID end_line) {
@@ -107,6 +115,9 @@ public:
 
       loopStack.debug_output();
       loopStack.pop();
+#if DP_METRICS_LOOP_EXIT
+      metrics_loop_exit(loopStack.size());
+#endif
       loopStack.debug_output();
     }
   }
@@ -144,6 +155,9 @@ public:
 
     loopStack.debug_output();
     loopStack.pop();
+#if DP_METRICS_LOOP_EXIT
+    metrics_loop_exit(loopStack.size());
+#endif
     loopStack.debug_output();
   }
 

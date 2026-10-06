@@ -14,6 +14,7 @@
 
 #include "../runtimeFunctions.hpp"
 #include "../runtimeFunctionsGlobals.hpp"
+#include "../shared_metrics.hpp"
 
 #include "../../share/include/debug_print.hpp"
 #include "../../share/include/timer.hpp"
@@ -57,6 +58,9 @@ void __dp_func_exit(LID lid, int32_t isExit) {
 
   function_manager->reset_call(lid);
   function_manager->decrease_stack_level();
+#if DP_METRICS_FUNC_EXIT
+  metrics_func_exit(function_manager->get_current_stack_level());
+#endif
 
   // TEST
   // clear information on allocated stack addresses

@@ -67,9 +67,6 @@ add_library(DiscoPoP_RT STATIC
 
 target_link_libraries(DiscoPoP_RT PRIVATE Boost::headers)
 
-# shm_open / shm_unlink used by shared_metrics.cpp
-target_link_libraries(DiscoPoP_RT PRIVATE rt)
-
 # forward compiler flags
 if(DEFINED DP_PTHREAD_COMPATIBILITY_MODE)
         if(NOT ${DP_PTHREAD_COMPATIBILITY_MODE} EQUAL 0)
@@ -127,6 +124,21 @@ if(DEFINED DP_MEMORY_REGION_DEALIASING)
         endif()
 endif()
 
+if(NOT DEFINED DP_LIVE_METRICS)
+        set(DP_LIVE_METRICS 1)
+endif()
+target_compile_definitions(DiscoPoP_RT PUBLIC DP_LIVE_METRICS=${DP_LIVE_METRICS})
+
+if(NOT ${DP_LIVE_METRICS} EQUAL 0)
+        foreach(_hook BB FUNC_ENTRY FUNC_EXIT LOOP_ENTRY LOOP_ITERATION LOOP_EXIT
+                        DEP_COUNTS TOTAL_DEPS QUEUE_SIZES WORKER_STATUS)
+                if(DEFINED DP_METRICS_${_hook})
+                        target_compile_definitions(DiscoPoP_RT PUBLIC DP_METRICS_${_hook}=${DP_METRICS_${_hook}})
+                endif()
+        endforeach()
+        # shm_open / shm_unlink used by shared_metrics.cpp
+        target_link_libraries(DiscoPoP_RT PRIVATE rt)
+endif()
 
 # end of compiler flags
 

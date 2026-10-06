@@ -175,3 +175,7 @@ _deps
 
 **/.discopop
 **/prog
+
+# local metrics overhead benchmark
+/scripts/dev/metrics_overhead/
+/profiler/metrics_consumer.py/

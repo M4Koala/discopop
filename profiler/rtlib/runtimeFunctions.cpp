@@ -56,7 +56,9 @@ using namespace dputil;
 namespace __dp {
 
 
-static thread_local bool current_thread_is_second_queue_worker = false;
+#if DP_METRICS_DEP_COUNTS
+static thread_local std::atomic<uint64_t> *current_thread_dep_counter = nullptr;
+#endif
 
 /******* Helper functions *******/
 
@@ -90,11 +92,10 @@ void addDep(depType type, LID curr, LID depOn, const char *var, std::int64_t AAv
     posInDeps->second->insert(Dep(type, depOn, var, AAvar));
   }
 
-  // add to corresponding dep count
-  if (current_thread_is_second_queue_worker)
-    metrics_inc_second_queue_dependency_count();
-  else
-    metrics_inc_first_queue_dependency_count();
+#if DP_METRICS_DEP_COUNTS
+  if (current_thread_dep_counter)
+    current_thread_dep_counter->fetch_add(1, std::memory_order_relaxed);
+#endif
 
 #if DP_CALLTREE_PROFILING
   // register dependency for call_tree based metadata calculation
@@ -294,8 +295,10 @@ void initParallelization() {
   // Initialize count of accesses
   numAccesses = new uint64_t[NUM_WORKERS]();
 
+#if DP_LIVE_METRICS
   // live metrics via shared memory
   metrics_init(NUM_WORKERS, 1);
+#endif
 
   // initialize and set thread detached attribute
   finalizeParallelizationCalled = false; // mostly for unit-tests.
@@ -330,6 +333,14 @@ void initSingleThreadedExecution() {
   }
 
   myMap = new depMap();
+
+#if DP_LIVE_METRICS
+  // live metrics via shared memory, the main thread takes the single worker slot
+  metrics_init(1, 0);
+#if DP_METRICS_DEP_COUNTS
+  current_thread_dep_counter = metrics_first_dep_counter(0);
+#endif
+#endif
 }
 
 string getMemoryRegionIdFromAddr(string fallback, ADDR addr) {
@@ -366,8 +377,12 @@ void mergeDeps() {
     // merge the associated set with current lid into the global hash table
     // add to total dep count if new
     for (auto &d : *(dep.second)) {
+#if DP_METRICS_TOTAL_DEPS
       if (tmp_depSet->insert(d).second)
         metrics_inc_total_dependency_count();
+#else
+      tmp_depSet->insert(d);
+#endif
     }
   }
   allDepsLock.unlock();
@@ -461,6 +476,36 @@ void analyzeSingleAccess(__dp::AbstractShadow *SMem, __dp::AccessInfo &access) {
   }
 }
 
+// dep profiling state, taken from bit 0 of control_flags, also moves the main thread chunk on a change
+bool profiling_enabled() {
+  const bool on = !metrics || (metrics->control_flags.load(std::memory_order_relaxed) & 1);
+#if defined DP_NUM_WORKERS && DP_NUM_WORKERS == 0
+  if (!on && singleThreadedExecutionSMem) { // off: delete the shadow memory
+    delete singleThreadedExecutionSMem;
+    singleThreadedExecutionSMem = nullptr;
+  }
+  if (on && !singleThreadedExecutionSMem) { // on again: use a new shadow memory
+    if (USE_PERFECT) {
+      singleThreadedExecutionSMem = new PerfectShadow2();
+    } else {
+      singleThreadedExecutionSMem = new ShadowMemory(SIG_ELEM_BIT, SIG_NUM_ELEM, SIG_NUM_HASH);
+    }
+  }
+#else
+  if (!on && mainThread_AccessInfoBuffer) { // off: give the partial chunk to the workers
+    firstAccessQueue.push(mainThread_AccessInfoBuffer);
+    mainThread_AccessInfoBuffer = nullptr;
+  }
+  if (on && !mainThread_AccessInfoBuffer) { // on again: queue a marker, then a new chunk
+    FirstAccessQueueChunk *marker = firstAccessQueueChunkBuffer.get_prepared_chunk(FIRST_ACCESS_QUEUE_SIZES);
+    marker->reset_marker = true;
+    firstAccessQueue.push(marker);
+    mainThread_AccessInfoBuffer = firstAccessQueueChunkBuffer.get_prepared_chunk(FIRST_ACCESS_QUEUE_SIZES);
+  }
+#endif
+  return on;
+}
+
 void *processFirstAccessQueue(void *arg) {
 #ifdef DP_INTERNAL_TIMER
   const auto timer = Timer(timers, TimerRegion::ANALYZE_DEPS);
@@ -468,6 +513,9 @@ void *processFirstAccessQueue(void *arg) {
 
   int64_t id = (int64_t)arg;
   myMap = new depMap();
+#if DP_METRICS_DEP_COUNTS
+  current_thread_dep_counter = metrics_first_dep_counter(id);
+#endif
 
   FirstAccessQueueChunk *current = nullptr;
 
@@ -481,11 +529,15 @@ void *processFirstAccessQueue(void *arg) {
   while (true) {
     // get chunk from queue
     current = firstAccessQueue.get(&secondAccessQueue);
+#if DP_METRICS_QUEUE_SIZES
     metrics_set_first_queue_size(firstAccessQueue.size());
+#endif
 
     // check if chunk aquired
     if (current) {
+#if DP_METRICS_WORKER_STATUS
       metrics_first_queue_worker_busy(id);
+#endif
       // process chunk
       AbstractShadow *SMem = new PerfectShadow2();
       std::vector<AccessInfo> *entry_condition_accesses = new std::vector<AccessInfo>();
@@ -527,7 +579,9 @@ void *processFirstAccessQueue(void *arg) {
       delete current;
 
     } else {
+#if DP_METRICS_WORKER_STATUS
       metrics_first_queue_worker_idle(id);
+#endif
       if (finalizeParallelizationCalled) {
         // no chunks left to process. Let thread finish.
         break;
@@ -569,8 +623,9 @@ void *processSecondAccessQueue(void *arg) {
   int64_t id = (int64_t)arg;
   myMap = new depMap();
 
-  // add found deps to right counter
-  current_thread_is_second_queue_worker = true;
+#if DP_METRICS_DEP_COUNTS
+  current_thread_dep_counter = metrics_second_dep_counter(id);
+#endif
 
   SecondAccessQueueElement *current = nullptr;
   AbstractShadow *SMem = new PerfectShadow2();
@@ -584,11 +639,25 @@ void *processSecondAccessQueue(void *arg) {
   while (true) {
     // get chunk from queue
     current = secondAccessQueue.get();
+#if DP_METRICS_QUEUE_SIZES
     metrics_set_second_queue_size(secondAccessQueue.size());
+#endif
 
     // check if chunk aquired
     if (current) {
+#if DP_METRICS_WORKER_STATUS
       metrics_second_queue_worker_busy(id);
+#endif
+      if (current->reset_marker) { // dep profiling was off in between, the shadow memory is not valid anymore
+        delete SMem;
+        SMem = new PerfectShadow2();
+#if DP_CALLTREE_PROFILING
+        thread_private_write_addr_to_call_tree_node_map.clear();
+        thread_private_read_addr_to_call_tree_node_map.clear();
+#endif
+        delete current;
+        continue;
+      }
       // check entry boundary conditions for data dependencies
       auto promised_first_accesses_vector_ptr = current->entry_boundary_first_addr_accesses.get();
       for (auto &entry_accesses : *(promised_first_accesses_vector_ptr)) {
@@ -625,7 +694,9 @@ void *processSecondAccessQueue(void *arg) {
       delete current;
 
     } else {
+#if DP_METRICS_WORKER_STATUS
       metrics_second_queue_worker_idle(id);
+#endif
       if (finalizeParallelizationCalled) {
         if (firstAccessQueue.empty()) {
           // no chunks left to process. Let thread finish.
@@ -677,8 +748,10 @@ void finalizeParallelization() {
   }
 
   // push last state of the mainThread_AccessInfoBuffer to the global FirstAccessQueue
-  firstAccessQueue.push(mainThread_AccessInfoBuffer);
-  mainThread_AccessInfoBuffer = firstAccessQueueChunkBuffer.get_prepared_chunk(FIRST_ACCESS_QUEUE_SIZES);
+  if (mainThread_AccessInfoBuffer) {
+    firstAccessQueue.push(mainThread_AccessInfoBuffer);
+    mainThread_AccessInfoBuffer = firstAccessQueueChunkBuffer.get_prepared_chunk(FIRST_ACCESS_QUEUE_SIZES);
+  }
 
   // fake signaling: just notify the workers that no more addresses will be
   // collected
@@ -689,7 +762,9 @@ void finalizeParallelization() {
     pthread_join(workers[i], NULL);
   pthread_join(*secondAccessQueue_worker_thread, NULL);
 
+#if DP_LIVE_METRICS
   metrics_shutdown();
+#endif
 
   // delete allocated memory
   delete[] workers;
@@ -711,6 +786,10 @@ void finalizeSingleThreadedExecution() {
 
   delete singleThreadedExecutionSMem;
   mergeDeps();
+
+#if DP_LIVE_METRICS
+  metrics_shutdown();
+#endif
 
   if (DP_DEBUG) {
     std::cout << "END: finalize Single Threaded Execution... \n";

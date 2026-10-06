@@ -65,6 +65,10 @@ void __dp_decl(LID lid, ADDR addr, char *var) {
   }
 #endif
 
+  if (!profiling_enabled()) {
+    return;
+  }
+
   function_manager->reset_call(lid);
 
   if (DP_DEBUG) {

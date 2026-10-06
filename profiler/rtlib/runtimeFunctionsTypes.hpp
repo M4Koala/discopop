@@ -172,6 +172,8 @@ public:
   std::promise<std::vector<AccessInfo> *> entry_boundary_first_addr_accesses;
   std::promise<AbstractShadow *> exit_boundary_SMem;
 
+  bool reset_marker = false; // profiling was re-enabled before this chunk
+
 private:
   std::vector<AccessInfo> buffer;
   std::size_t element_count = 0;
@@ -188,6 +190,8 @@ public:
 
   std::future<std::vector<AccessInfo> *> entry_boundary_first_addr_accesses;
   std::future<AbstractShadow *> exit_boundary_SMem;
+
+  bool reset_marker = false; // copied from the source chunk
 };
 
 class SecondAccessQueue {
@@ -254,6 +258,7 @@ public:
     // register Futures in SecondAccessQueue
     SecondAccessQueueElement *saqe =
         new SecondAccessQueueElement(std::move(buffer->get_entry_future()), std::move(buffer->get_exit_future()));
+    saqe->reset_marker = buffer->reset_marker;
     secondAccessQueue_ptr->push(saqe);
 
     return buffer;
