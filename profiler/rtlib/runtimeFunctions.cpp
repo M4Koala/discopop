@@ -478,6 +478,9 @@ void analyzeSingleAccess(__dp::AbstractShadow *SMem, __dp::AccessInfo &access) {
 
 // dep profiling state, taken from bit 0 of control_flags, also moves the main thread chunk on a change
 bool profiling_enabled() {
+#if !DP_LIVE_METRICS
+  return true;
+#else
   const bool on = !metrics || (metrics->control_flags.load(std::memory_order_relaxed) & 1);
 #if defined DP_NUM_WORKERS && DP_NUM_WORKERS == 0
   if (!on && singleThreadedExecutionSMem) { // off: delete the shadow memory
@@ -504,6 +507,7 @@ bool profiling_enabled() {
   }
 #endif
   return on;
+#endif
 }
 
 void *processFirstAccessQueue(void *arg) {

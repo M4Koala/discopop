@@ -14,6 +14,7 @@
 
 #include "../runtimeFunctions.hpp"
 #include "../runtimeFunctionsGlobals.hpp"
+#include "../shared_metrics.hpp"
 
 #include "../../share/include/debug_print.hpp"
 #include "../../share/include/timer.hpp"
@@ -66,9 +67,11 @@ void __dp_write(LID lid, ADDR addr, const char *var) {
   }
 #endif
 
+#if DP_LIVE_METRICS
   if (!profiling_enabled()) {
     return;
   }
+#endif
 
   // For tracking function call or invoke
   function_manager->reset_call(lid);
